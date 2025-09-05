@@ -127,67 +127,6 @@ QUIC از فیلد نسخه در header جهت مدیریت تکامل استف�
 - **حفره‌های ناشی از پیاده‌سازی:** همانند همه پروتکل‌ها، پیاده‌سازی‌ها ممکن است با نقص‌هایی همراه باشند؛ بنابرین استفاده از نسخه‌های به‌روز و audit اهمیت دارد.
 
 ---
-
-## نمونهٔ کد — سرور و کلاینت ساده با aioquic (Python)
-پیش‌نیاز: `pip install aioquic`
-
-**سرور ساده (server.py):**
-```python
-# server.py - نمونهٔ سادهٔ HTTP/3 سرور با aioquic
-import asyncio
-from aioquic.asyncio import serve
-from aioquic.quic.configuration import QuicConfiguration
-from aioquic.asyncio.protocol import QuicConnectionProtocol
-from aioquic.h3.connection import H3Connection
-from aioquic.h3.events import H3Event, HeadersReceived, DataReceived
-
-class SimpleH3Protocol(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._http = H3Connection(self._quic)
-    def quic_event_received(self, event):
-        for h3_event in self._http.handle_event(event):
-            if isinstance(h3_event, HeadersReceived):
-                stream_id = h3_event.stream_id
-                # پاسخ ساده
-                headers = [(b':status', b'200'), (b'content-type', b'text/plain')]
-                self._http.send_headers(stream_id=stream_id, headers=headers)
-                self._http.send_data(stream_id=stream_id, data=b'Hello from aioquic!', end_stream=True)
-            elif isinstance(h3_event, DataReceived):
-                pass
-
-async def main():
-    config = QuicConfiguration(is_client=False)
-    config.load_cert_chain("certificate.pem", "key.pem")  # گواهی و کلید خود را قرار دهید
-    await serve("0.0.0.0", 4433, configuration=config, create_protocol=SimpleH3Protocol)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-**کلاینت ساده (client.py):**
-```python
-# client.py - نمونهٔ سادهٔ کلاینت HTTP/3 با aioquic
-import asyncio
-from aioquic.asyncio import connect
-from aioquic.quic.configuration import QuicConfiguration
-from aioquic.h3.connection import H3Connection
-from aioquic.h3.events import HeadersReceived, DataReceived
-
-async def main():
-    config = QuicConfiguration(is_client=True, verify_mode=0)
-    async with connect("127.0.0.1", 4433, configuration=config, create_protocol=H3Connection) as client:
-        h3 = client._quic  # دسترسی مستقیم به شیء QUIC در این نمونه ساده
-        # برای نمونهٔ کامل‌تر از APIهای aioquic استفاده کنید؛ اینجا صرفاً جهت ایده است.
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-> هشدار: این نمونه‌ها **خیلی ساده** هستند و برای تولید مناسب نیستند. از مثال‌ها و مستندات رسمی `aioquic` برای ساخت برنامهٔ کامل استفاده کنید.
-
----
-
 ## عیب‌یابی و Troubleshooting رایج
 
 ### 1) handshake failure / TLS errors
@@ -235,40 +174,3 @@ curl -v --http3 https://example.com
 - [Cloudflare Radar / Year in Review](https://blog.cloudflare.com/radar-2024-year-in-review/?utm_source=chatgpt.com/)
 - [W3Techs — Usage Statistics of HTTP/3](https://w3techs.com/technologies/details/ce-http3?utm_source=chatgpt.com)
 - [HTTP Archive — Web Almanac](https://almanac.httparchive.org/en/2024/http?utm_source=chatgpt.com)
-
----
-
-## بخش B — مثال قابل اجرا و کامل با `aioquic` (گام‌به‌گام)
-
-### 1) آماده‌سازی محیط
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install aioquic
-```
-
-### 2) تولید گواهی self-signed (برای تست محلی)
-```bash
-openssl req -x509 -newkey rsa:4096 -nodes -keyout key.pem -out cert.pem -days 365   -subj "/CN=localhost"
-```
-
-### 3) اجرای سرور نمونهٔ HTTP/3 از examples `aioquic`
-`aioquic` مخزن مثال‌هایی دارد؛ یکی از ساده‌ترین راه‌ها استفاده از اسکریپت‌های نمونه است (مستندات و examples در مخزن رسمی توضیح داده شده‌اند). citeturn0search8turn0search18
-
-مثلاً اگر نمونهٔ `http3_server` نصب یا در مخزن موجود است اجرا کنید:
-```bash
-python -m aioquic.examples.http3_server --certificate cert.pem --private-key key.pem  --bind 0.0.0.0:4433
-```
-
-### 4) اجرای کلاینت نمونه یا تست با curl (برای تست local با self-signed)
-برای curl لازم است نسخه‌ای داشته باشید که از HTTP/3 پشتیبانی کند؛ برای تست محلی می‌توانید از `--insecure` یا تنظیم CA استفاده کنید:
-```bash
-curl -v --http3 --insecure https://localhost:4433/
-```
-
-نکات و تذکرها:
-- `aioquic` کتابخانهٔ مناسبی برای پروتوتایپ و توسعه سریع است و مثال‌های آماده در مستندات وجود دارند. برای استفادهٔ تولیدی بهینه‌سازی و بررسی security لازم است. citeturn0search3turn0search8
-
----
-
