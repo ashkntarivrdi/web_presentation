@@ -329,3 +329,4 @@ curl -v --http3 https://example.com
 - [Cloudflare Radar / Year in Review](https://blog.cloudflare.com/radar-2024-year-in-review/?utm_source=chatgpt.com/)
 - [W3Techs — Usage Statistics of HTTP/3](https://w3techs.com/technologies/details/ce-http3?utm_source=chatgpt.com)
 - [HTTP Archive — Web Almanac](https://almanac.httparchive.org/en/2024/http?utm_source=chatgpt.com)
+- [Aioquic Documentation](https://aioquic.readthedocs.io/en/latest/)
