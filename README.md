@@ -1,5 +1,4 @@
 اشکان تاریوردی 401105753، آیین پوست‌فروشان 401105742، نیما موذن 401106599
----
 # QUIC
 
 ---
@@ -127,6 +126,162 @@ QUIC از فیلد نسخه در header جهت مدیریت تکامل استف�
 - **حفره‌های ناشی از پیاده‌سازی:** همانند همه پروتکل‌ها، پیاده‌سازی‌ها ممکن است با نقص‌هایی همراه باشند؛ بنابرین استفاده از نسخه‌های به‌روز و audit اهمیت دارد.
 
 ---
+
+## نمونهٔ کد — سرور و کلاینت ساده با aioquic (Python)
+**سرور ساده (server.py):**
+```python
+
+import argparse
+import asyncio
+from typing import Optional
+
+from aioquic.asyncio import QuicConnectionProtocol, serve
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.events import QuicEvent, StreamDataReceived
+
+
+class EchoProtocol(QuicConnectionProtocol):
+    """A minimal QUIC echo protocol.
+
+    For every received stream fragment, immediately echo it back on the same stream.
+    """
+
+    def quic_event_received(self, event: QuicEvent) -> None:  # type: ignore[override]
+        if isinstance(event, StreamDataReceived):
+            # Echo back the bytes and mirror end_stream so the client sees EOF.
+            self._quic.send_stream_data(event.stream_id, event.data, end_stream=event.end_stream)
+            self.transmit()
+
+
+async def main(host: str, port: int, certificate: str, private_key: str, secrets_log: Optional[str]) -> None:
+    # Configure QUIC with a self-signed certificate. ALPN "hq-29" is fine for a raw QUIC demo.
+    configuration = QuicConfiguration(is_client=False, alpn_protocols=["hq-29"])  # type: ignore[arg-type]
+    configuration.load_cert_chain(certificate, private_key)
+
+    if secrets_log:
+        configuration.secrets_log_file = open(secrets_log, "a")
+
+    server = await serve(
+        host,
+        port,
+        configuration=configuration,
+        create_protocol=EchoProtocol,
+        retry=False,
+    )
+    print(f"QUIC echo server listening on {host}:{port}")
+
+    try:
+        # Run until Ctrl+C
+        await asyncio.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Minimal QUIC echo server (aioquic)")
+    parser.add_argument("--host", default="127.0.0.1", help="Listen address (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=4433, help="UDP port (default: 4433)")
+    parser.add_argument("--certificate", default="quic.crt", help="Path to certificate (PEM)")
+    parser.add_argument("--private-key", dest="private_key", default="quic.key", help="Path to private key (PEM)")
+    parser.add_argument("--secrets-log", default="ssl_keylog.txt", help="Optional TLS secrets log file for Wireshark")
+    args = parser.parse_args()
+
+    asyncio.run(main(args.host, args.port, args.certificate, args.private_key, args.secrets_log))
+```
+
+**کلاینت ساده (client.py):**
+```python
+
+import argparse
+import asyncio
+import ssl
+from typing import Optional
+
+from aioquic.asyncio import connect
+from aioquic.asyncio.protocol import QuicConnectionProtocol
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.events import QuicEvent, StreamDataReceived
+
+
+class SimpleClient(QuicConnectionProtocol):
+    """A tiny QUIC client that sends one message and collects the echo."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def quic_event_received(self, event: QuicEvent) -> None:  # type: ignore[override]
+        if isinstance(event, StreamDataReceived):
+            # Collect echoed data from the server
+            self._queue.put_nowait(event.data)
+
+    async def send_and_receive(self, data: bytes) -> bytes:
+        stream_id = self._quic.get_next_available_stream_id()
+        self._quic.send_stream_data(stream_id, data, end_stream=True)
+        self.transmit()
+        return await asyncio.wait_for(self._queue.get(), timeout=5.0)
+
+
+async def main(host: str, port: int, message: str, secrets_log: Optional[str]) -> None:
+    # Client QUIC configuration. We disable cert verification for this local demo.
+    configuration = QuicConfiguration(is_client=True, alpn_protocols=["hq-29"])  # type: ignore[arg-type]
+    configuration.verify_mode = ssl.CERT_NONE  # trust our self-signed server for the demo
+
+    if secrets_log:
+        configuration.secrets_log_file = open(secrets_log, "a")
+
+    async with connect(host, port, configuration=configuration, create_protocol=SimpleClient) as client:
+        proto: SimpleClient = client  # type: ignore[assignment]
+        data = await proto.send_and_receive(message.encode("utf-8"))
+        print(data.decode("utf-8"))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Minimal QUIC client (aioquic)")
+    parser.add_argument("--host", default="127.0.0.1", help="Server address (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=4433, help="UDP port (default: 4433)")
+    parser.add_argument("--message", default="Hello on QUIC Protocol!", help="Message to send")
+    parser.add_argument("--secrets-log", default="ssl_keylog.txt", help="Optional TLS secrets log file for Wireshark")
+    args = parser.parse_args()
+
+    asyncio.run(main(args.host, args.port, args.message, args.secrets_log))
+
+```
+**نحوه اجرا**:
+آماده‌سازی محیط
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv wireshark openssl
+cd "$HOME/web/quic_demo"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+**ایجاد یک گواهی محلی**:
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout quic.key -out quic.crt -days 365 -nodes -subj "/CN=localhost"
+```
+
+**اجرای سرور**:
+```bash
+cd "$HOME/web/quic_demo"
+source .venv/bin/activate
+python3 server.py --host 127.0.0.1 --port 4433 --certificate quic.crt --private-key quic.key
+```
+
+**اجرای کلاینت**:
+```bash
+cd "$HOME/web/quic_demo"
+source .venv/bin/activate
+python3 client.py --host 127.0.0.1 --port 4433 --message "Hello on QUIC Protocol!"
+```
+---
+
 ## عیب‌یابی و Troubleshooting رایج
 
 ### 1) handshake failure / TLS errors
