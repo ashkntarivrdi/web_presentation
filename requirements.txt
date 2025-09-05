@@ -1,2 +1,0 @@
-# Minimal dependencies for the QUIC echo demo
-aioquic>=1.2.0
